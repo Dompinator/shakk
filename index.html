@@ -8,14 +8,25 @@
 </head>
 <body>
     <div class="container">
-        <h1>Shakk Chess</h1>
-        <div id="status">Click Find Match to play</div>
-        <div id="board"></div>
-        <div class="controls">
-            <button id="findMatch">Find Match</button>
-            <button id="reset" style="display:none;">New Game</button>
+        <!-- Main Menu -->
+        <div id="menu">
+            <h1>Shakk Chess</h1>
+            <p>Choose how you want to play</p>
+            <button id="singlePlayerBtn">Single Player</button>
+            <button id="findMatchBtn">Find Online Match</button>
         </div>
-        <p id="info">Multiplayer chess with matchmaking</p>
+
+        <!-- Game Area (hidden at start) -->
+        <div id="game" style="display:none;">
+            <h1>Shakk Chess</h1>
+            <div id="status">White to move</div>
+            <div id="board"></div>
+            <div class="controls">
+                <button id="backToMenu">Back to Menu</button>
+                <button id="resetGame">Reset Game</button>
+            </div>
+            <p id="info"></p>
+        </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>

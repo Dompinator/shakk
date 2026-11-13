@@ -3,11 +3,15 @@ const SUPABASE_KEY = 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1';
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const chess = new Chess();
+const menuEl = document.getElementById('menu');
+const gameEl = document.getElementById('game');
 const boardEl = document.getElementById('board');
 const statusEl = document.getElementById('status');
-const findMatchBtn = document.getElementById('findMatch');
-const resetBtn = document.getElementById('reset');
 const infoEl = document.getElementById('info');
+const singlePlayerBtn = document.getElementById('singlePlayerBtn');
+const findMatchBtn = document.getElementById('findMatchBtn');
+const backToMenuBtn = document.getElementById('backToMenu');
+const resetGameBtn = document.getElementById('resetGame');
 
 const pieces = {
     'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
@@ -17,11 +21,33 @@ const pieces = {
 let playerId = localStorage.getItem('playerId') || crypto.randomUUID();
 localStorage.setItem('playerId', playerId);
 
+let mode = null; // 'single' or 'online'
 let currentGameId = null;
 let myColor = null;
 let selectedSquare = null;
 let possibleMoves = [];
 let channel = null;
+
+function showMenu() {
+    menuEl.style.display = 'block';
+    gameEl.style.display = 'none';
+    if (channel) {
+        supabase.removeChannel(channel);
+        channel = null;
+    }
+    mode = null;
+    currentGameId = null;
+    myColor = null;
+    chess.reset();
+    selectedSquare = null;
+    possibleMoves = [];
+}
+
+function startGame() {
+    menuEl.style.display = 'none';
+    gameEl.style.display = 'block';
+    renderBoard();
+}
 
 function renderBoard() {
     boardEl.innerHTML = '';
@@ -56,8 +82,23 @@ function renderBoard() {
 }
 
 function updateStatus() {
+    if (mode === 'single') {
+        const turn = chess.turn() === 'w' ? 'White' : 'Black';
+        if (chess.in_checkmate()) {
+            statusEl.textContent = `Checkmate! ${turn === 'White' ? 'Black' : 'White'} wins.`;
+        } else if (chess.in_draw()) {
+            statusEl.textContent = 'Draw!';
+        } else if (chess.in_check()) {
+            statusEl.textContent = `${turn} is in check.`;
+        } else {
+            statusEl.textContent = `${turn} to move`;
+        }
+        infoEl.textContent = 'Local game - both players on this device';
+        return;
+    }
+
     if (!currentGameId) {
-        statusEl.textContent = 'Click Find Match to play';
+        statusEl.textContent = 'Searching...';
         return;
     }
     const turn = chess.turn() === 'w' ? 'White' : 'Black';
@@ -73,10 +114,12 @@ function updateStatus() {
     }
 }
 
-async function onSquareClick(square) {
-    if (!currentGameId || !myColor) return;
-    const isMyTurn = (chess.turn() === 'w' && myColor === 'white') || (chess.turn() === 'b' && myColor === 'black');
-    if (!isMyTurn) return;
+function onSquareClick(square) {
+    if (mode === 'online') {
+        if (!currentGameId || !myColor) return;
+        const isMyTurn = (chess.turn() === 'w' && myColor === 'white') || (chess.turn() === 'b' && myColor === 'black');
+        if (!isMyTurn) return;
+    }
 
     if (selectedSquare) {
         const move = chess.move({
@@ -85,21 +128,20 @@ async function onSquareClick(square) {
             promotion: 'q'
         });
         if (move) {
-            // Update Supabase
-            await supabase.from('games').update({
-                fen: chess.fen(),
-                turn: chess.turn(),
-                updated_at: new Date().toISOString()
-            }).eq('id', currentGameId);
+            if (mode === 'online' && currentGameId) {
+                supabase.from('games').update({
+                    fen: chess.fen(),
+                    turn: chess.turn(),
+                    updated_at: new Date().toISOString()
+                }).eq('id', currentGameId);
 
-            // Optionally log move
-            await supabase.from('moves').insert({
-                game_id: currentGameId,
-                move: move.san,
-                fen: chess.fen(),
-                player: myColor
-            });
-
+                supabase.from('moves').insert({
+                    game_id: currentGameId,
+                    move: move.san,
+                    fen: chess.fen(),
+                    player: myColor
+                });
+            }
             selectedSquare = null;
             possibleMoves = [];
             renderBoard();
@@ -118,11 +160,20 @@ async function onSquareClick(square) {
     renderBoard();
 }
 
-async function findMatch() {
-    findMatchBtn.disabled = true;
-    statusEl.textContent = 'Searching for opponent...';
+function startSinglePlayer() {
+    mode = 'single';
+    chess.reset();
+    selectedSquare = null;
+    possibleMoves = [];
+    startGame();
+}
 
-    // Look for waiting game
+async function findMatch() {
+    mode = 'online';
+    statusEl.textContent = 'Searching for opponent...';
+    infoEl.textContent = 'Looking for a match...';
+    startGame();
+
     const { data: waiting } = await supabase
         .from('games')
         .select('*')
@@ -132,7 +183,6 @@ async function findMatch() {
         .limit(1);
 
     if (waiting && waiting.length > 0) {
-        // Join as black
         const game = waiting[0];
         await supabase.from('games').update({
             black_player: playerId,
@@ -141,11 +191,10 @@ async function findMatch() {
 
         currentGameId = game.id;
         myColor = 'black';
-        chess.load(game.fen);
-        subscribeToGame();
+        chess.load(game.fen || chess.fen());
         infoEl.textContent = 'You are Black';
+        subscribeToGame();
     } else {
-        // Create new game as white
         const { data: newGame } = await supabase.from('games').insert({
             white_player: playerId,
             status: 'waiting',
@@ -154,12 +203,9 @@ async function findMatch() {
 
         currentGameId = newGame.id;
         myColor = 'white';
-        subscribeToGame();
         infoEl.textContent = 'You are White - waiting for opponent...';
+        subscribeToGame();
     }
-
-    findMatchBtn.style.display = 'none';
-    resetBtn.style.display = 'inline-block';
     renderBoard();
 }
 
@@ -186,20 +232,19 @@ function subscribeToGame() {
         .subscribe();
 }
 
+singlePlayerBtn.addEventListener('click', startSinglePlayer);
 findMatchBtn.addEventListener('click', findMatch);
-
-resetBtn.addEventListener('click', () => {
-    if (channel) supabase.removeChannel(channel);
-    currentGameId = null;
-    myColor = null;
-    chess.reset();
-    selectedSquare = null;
-    possibleMoves = [];
-    findMatchBtn.style.display = 'inline-block';
-    findMatchBtn.disabled = false;
-    resetBtn.style.display = 'none';
-    infoEl.textContent = 'Multiplayer chess with matchmaking';
-    renderBoard();
+backToMenuBtn.addEventListener('click', showMenu);
+resetGameBtn.addEventListener('click', () => {
+    if (mode === 'single') {
+        chess.reset();
+        selectedSquare = null;
+        possibleMoves = [];
+        renderBoard();
+    } else {
+        showMenu();
+    }
 });
 
-renderBoard();
+// Start on menu
+showMenu();

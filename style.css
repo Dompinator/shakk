@@ -13,6 +13,23 @@ body {
 h1 {
     color: #333;
 }
+#menu {
+    padding: 40px;
+}
+#menu button, .controls button {
+    display: block;
+    margin: 15px auto;
+    padding: 12px 30px;
+    font-size: 1.2em;
+    cursor: pointer;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+}
+#menu button:hover, .controls button:hover {
+    background: #45a049;
+}
 #status {
     font-size: 1.2em;
     margin: 10px 0;
@@ -50,12 +67,6 @@ h1 {
 }
 .piece {
     pointer-events: none;
-}
-.controls button {
-    margin: 5px;
-    padding: 8px 16px;
-    font-size: 1em;
-    cursor: pointer;
 }
 @media (max-width: 500px) {
     #board {
