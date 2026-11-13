@@ -1,30 +1,8 @@
-window.scriptStarted = true;
-
+// Chess + matchmaking (loaded after auth functions)
 const SUPABASE_URL = 'https://devxzklnldwhyxrlorck.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1';
-let supabase;
-try {
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-} catch (e) {
-    console.error('Supabase init failed', e);
-    window.supabaseError = e.message;
-}
-
-const chess = new Chess();
-const menuEl = document.getElementById('menu');
-const gameEl = document.getElementById('game');
-const boardEl = document.getElementById('board');
-const statusEl = document.getElementById('status');
-const infoEl = document.getElementById('info');
-
-const pieces = {
-    'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
-    'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
-};
-
-let playerId = localStorage.getItem('playerId') || crypto.randomUUID();
-localStorage.setItem('playerId', playerId);
-
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let chess = new Chess();
 let mode = null;
 let currentGameId = null;
 let myColor = null;
@@ -32,28 +10,20 @@ let selectedSquare = null;
 let possibleMoves = [];
 let channel = null;
 
-function showMenu() {
-    if (menuEl) menuEl.style.display = 'block';
-    if (gameEl) gameEl.style.display = 'none';
-    if (channel && supabase) {
-        supabase.removeChannel(channel);
-        channel = null;
-    }
-    mode = null;
-    currentGameId = null;
-    myColor = null;
-    chess.reset();
-    selectedSquare = null;
-    possibleMoves = [];
-}
+const pieces = {
+    'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
+    'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
+};
 
-function startGame() {
-    if (menuEl) menuEl.style.display = 'none';
-    if (gameEl) gameEl.style.display = 'block';
+function showGame() {
+    document.getElementById('auth').style.display = 'none';
+    document.getElementById('menu').style.display = 'none';
+    document.getElementById('game').style.display = 'block';
     renderBoard();
 }
 
 function renderBoard() {
+    const boardEl = document.getElementById('board');
     if (!boardEl) return;
     boardEl.innerHTML = '';
     const board = chess.board();
@@ -61,24 +31,20 @@ function renderBoard() {
         for (let col = 0; col < 8; col++) {
             const square = document.createElement('div');
             const isLight = (row + col) % 2 === 0;
-            square.className = `square ${isLight ? 'light' : 'dark'}`;
+            square.className = 'square ' + (isLight ? 'light' : 'dark');
             const file = String.fromCharCode(97 + col);
             const rank = 8 - row;
             const squareName = file + rank;
-            square.dataset.square = squareName;
-
             const piece = board[row][col];
             if (piece) {
-                const pieceSpan = document.createElement('span');
-                pieceSpan.className = 'piece';
+                const span = document.createElement('span');
+                span.className = 'piece';
                 const key = piece.color === 'w' ? piece.type.toUpperCase() : piece.type;
-                pieceSpan.textContent = pieces[key];
-                square.appendChild(pieceSpan);
+                span.textContent = pieces[key];
+                square.appendChild(span);
             }
-
             if (selectedSquare === squareName) square.classList.add('selected');
             if (possibleMoves.includes(squareName)) square.classList.add('possible');
-
             square.onclick = () => onSquareClick(squareName);
             boardEl.appendChild(square);
         }
@@ -87,65 +53,38 @@ function renderBoard() {
 }
 
 function updateStatus() {
+    const statusEl = document.getElementById('status');
+    const infoEl = document.getElementById('info');
     if (!statusEl) return;
     if (mode === 'single') {
         const turn = chess.turn() === 'w' ? 'White' : 'Black';
-        if (chess.in_checkmate()) {
-            statusEl.textContent = `Checkmate! ${turn === 'White' ? 'Black' : 'White'} wins.`;
-        } else if (chess.in_draw()) {
-            statusEl.textContent = 'Draw!';
-        } else if (chess.in_check()) {
-            statusEl.textContent = `${turn} is in check.`;
-        } else {
-            statusEl.textContent = `${turn} to move`;
-        }
-        if (infoEl) infoEl.textContent = 'Local game - both players on this device';
+        statusEl.textContent = chess.in_checkmate() ? 'Checkmate!' : (chess.in_check() ? turn + ' in check' : turn + ' to move');
+        if (infoEl) infoEl.textContent = 'Local game';
         return;
     }
-
-    if (!currentGameId) {
+    if (!currentGameId || !myColor) {
         statusEl.textContent = 'Finding Match...';
         return;
     }
     const turn = chess.turn() === 'w' ? 'White' : 'Black';
     const myTurn = (chess.turn() === 'w' && myColor === 'white') || (chess.turn() === 'b' && myColor === 'black');
-    if (chess.in_checkmate()) {
-        statusEl.textContent = `Checkmate! ${turn === 'White' ? 'Black' : 'White'} wins.`;
-    } else if (chess.in_draw()) {
-        statusEl.textContent = 'Draw!';
-    } else if (chess.in_check()) {
-        statusEl.textContent = `${turn} is in check. ${myTurn ? '(Your turn)' : ''}`;
-    } else {
-        statusEl.textContent = `${turn} to move ${myTurn ? '(Your turn)' : '(Opponent turn)'}`;
-    }
+    statusEl.textContent = chess.in_checkmate() ? 'Checkmate!' : (turn + ' to move ' + (myTurn ? '(You)' : '(Opponent)'));
 }
 
 function onSquareClick(square) {
-    if (mode === 'online') {
-        if (!currentGameId || !myColor) return;
+    if (mode === 'online' && currentGameId && myColor) {
         const isMyTurn = (chess.turn() === 'w' && myColor === 'white') || (chess.turn() === 'b' && myColor === 'black');
         if (!isMyTurn) return;
     }
-
     if (selectedSquare) {
-        const move = chess.move({
-            from: selectedSquare,
-            to: square,
-            promotion: 'q'
-        });
+        const move = chess.move({ from: selectedSquare, to: square, promotion: 'q' });
         if (move) {
-            if (mode === 'online' && currentGameId && supabase) {
+            if (mode === 'online' && currentGameId) {
                 supabase.from('games').update({
                     fen: chess.fen(),
                     turn: chess.turn(),
                     updated_at: new Date().toISOString()
                 }).eq('id', currentGameId);
-                supabase.from('moves').insert({
-                    game_id: currentGameId,
-                    move: move.san,
-                    fen: chess.fen(),
-                    player: myColor
-                });
             }
             selectedSquare = null;
             possibleMoves = [];
@@ -153,11 +92,10 @@ function onSquareClick(square) {
             return;
         }
     }
-
     const piece = chess.get(square);
     if (piece && piece.color === chess.turn()) {
         selectedSquare = square;
-        possibleMoves = chess.moves({ square, verbose: true }).map(m => m.to);
+        possibleMoves = chess.moves({ square: square, verbose: true }).map(m => m.to);
     } else {
         selectedSquare = null;
         possibleMoves = [];
@@ -165,107 +103,96 @@ function onSquareClick(square) {
     renderBoard();
 }
 
-window.startSinglePlayer = function() {
+window.startSingle = function() {
     mode = 'single';
     chess.reset();
     selectedSquare = null;
     possibleMoves = [];
-    startGame();
+    showGame();
 };
 
-window.findMatch = async function() {
+window.startOnline = async function() {
     mode = 'online';
-    if (statusEl) statusEl.textContent = 'Finding Match...';
-    if (infoEl) infoEl.textContent = 'Connecting to server...';
-    startGame();
+    myColor = null;
+    currentGameId = null;
+    document.getElementById('status').textContent = 'Finding Match...';
+    document.getElementById('info').textContent = 'Looking for opponent...';
+    showGame();
+    const user = window.currentUser;
+    if (!user) { document.getElementById('info').textContent = 'Not logged in'; return; }
 
-    if (!supabase) {
-        if (infoEl) infoEl.textContent = 'Supabase not available. Check console.';
-        return;
+    const { data: waiting } = await supabase
+        .from('games')
+        .select('*')
+        .eq('status', 'waiting')
+        .neq('white_player', user.id)
+        .limit(1);
+
+    if (waiting && waiting.length > 0) {
+        const game = waiting[0];
+        const otherPlayer = game.white_player;
+        const iAmWhite = Math.random() < 0.5;
+        const update = {
+            black_player: iAmWhite ? otherPlayer : user.id,
+            white_player: iAmWhite ? user.id : otherPlayer,
+            status: 'active'
+        };
+        await supabase.from('games').update(update).eq('id', game.id);
+        currentGameId = game.id;
+        myColor = iAmWhite ? 'white' : 'black';
+        chess.load(game.fen || chess.fen());
+        document.getElementById('info').textContent = 'Matched! You are ' + (myColor === 'white' ? 'White' : 'Black');
+        subscribe();
+    } else {
+        const { data: newGame } = await supabase.from('games').insert({
+            white_player: user.id,
+            status: 'waiting',
+            fen: chess.fen()
+        }).select().single();
+        currentGameId = newGame.id;
+        document.getElementById('info').textContent = 'Waiting for opponent...';
+        subscribe();
     }
-
-    try {
-        const { data: waiting, error: selectError } = await supabase
-            .from('games')
-            .select('*')
-            .eq('status', 'waiting')
-            .is('black_player', null)
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-        if (selectError) throw selectError;
-
-        if (waiting && waiting.length > 0) {
-            const game = waiting[0];
-            const { error: updateError } = await supabase.from('games').update({
-                black_player: playerId,
-                status: 'active'
-            }).eq('id', game.id);
-
-            if (updateError) throw updateError;
-
-            currentGameId = game.id;
-            myColor = 'black';
-            chess.load(game.fen || chess.fen());
-            if (infoEl) infoEl.textContent = 'You are Black';
-            subscribeToGame();
-        } else {
-            const { data: newGame, error: insertError } = await supabase.from('games').insert({
-                white_player: playerId,
-                status: 'waiting',
-                fen: chess.fen()
-            }).select().single();
-
-            if (insertError) throw insertError;
-
-            currentGameId = newGame.id;
-            myColor = 'white';
-            if (infoEl) infoEl.textContent = 'You are White - waiting for opponent...';
-            subscribeToGame();
-        }
-        renderBoard();
-    } catch (err) {
-        console.error(err);
-        if (statusEl) statusEl.textContent = 'Error connecting';
-        if (infoEl) infoEl.textContent = 'Error: ' + (err.message || JSON.stringify(err));
-    }
+    renderBoard();
 };
 
-function subscribeToGame() {
-    if (!supabase || !currentGameId) return;
+function subscribe() {
     if (channel) supabase.removeChannel(channel);
     channel = supabase.channel('game-' + currentGameId)
-        .on('postgres_changes', {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'games',
-            filter: `id=eq.${currentGameId}`
-        }, (payload) => {
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: 'id=eq.' + currentGameId }, (payload) => {
             const game = payload.new;
-            if (game.fen && game.fen !== chess.fen()) {
+            const user = window.currentUser;
+            if (game.status === 'active' && game.white_player && game.black_player && user) {
+                if (game.white_player === user.id) myColor = 'white';
+                else if (game.black_player === user.id) myColor = 'black';
+                document.getElementById('info').textContent = 'Matched! You are ' + (myColor === 'white' ? 'White' : 'Black');
+                if (game.fen) chess.load(game.fen);
+                selectedSquare = null;
+                possibleMoves = [];
+                renderBoard();
+            } else if (game.fen && game.fen !== chess.fen()) {
                 chess.load(game.fen);
                 selectedSquare = null;
                 possibleMoves = [];
                 renderBoard();
             }
-            if (game.status === 'active' && myColor === 'white' && infoEl) {
-                infoEl.textContent = 'Opponent joined! You are White';
-            }
-        })
-        .subscribe();
+        }).subscribe();
 }
 
-window.showMenu = showMenu;
-window.resetCurrentGame = function() {
+window.backToMenu = function() {
+    if (channel) supabase.removeChannel(channel);
+    mode = null;
+    currentGameId = null;
+    myColor = null;
+    document.getElementById('game').style.display = 'none';
+    document.getElementById('menu').style.display = 'block';
+};
+
+window.resetGame = function() {
     if (mode === 'single') {
         chess.reset();
         selectedSquare = null;
         possibleMoves = [];
         renderBoard();
-    } else {
-        showMenu();
     }
 };
-
-showMenu();
-window.scriptFinished = true;
