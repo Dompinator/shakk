@@ -5,6 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shakk - Chess</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+    .brilliant {
+        position: relative;
+    }
+    .brilliant::after {
+        content: "!!";
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        background: #22c55e;
+        color: white;
+        font-size: 12px;
+        font-weight: bold;
+        border-radius: 50%;
+        width: 18px;
+        height: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 4px #22c55e;
+    }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -52,11 +74,34 @@
     window.possibleMoves = [];
     window.channel = null;
     window.gameEnded = false;
+    window.brilliantPawns = new Set(); // squares with brilliant pawns
 
     const pieces = {
         'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
         'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
     };
+
+    function fileToCol(file) { return file.charCodeAt(0) - 97; }
+    function colToFile(col) { return String.fromCharCode(97 + col); }
+
+    function getSpecialBrilliantMove(square) {
+        const piece = window.chess.get(square);
+        if (!piece || piece.type !== 'p') return null;
+        const file = square[0];
+        const rank = parseInt(square[1]);
+        const color = piece.color;
+        const aheadRank = color === 'w' ? rank + 1 : rank - 1;
+        if (aheadRank < 1 || aheadRank > 8) return null;
+        const aheadSquare = file + aheadRank;
+        const aheadPiece = window.chess.get(aheadSquare);
+        if (!aheadPiece || aheadPiece.type !== 'p' || aheadPiece.color === color) return null;
+        // Can move 1 step to the right (increasing file)
+        const rightCol = fileToCol(file) + 1;
+        if (rightCol > 7) return null;
+        const rightSquare = colToFile(rightCol) + rank;
+        if (window.chess.get(rightSquare)) return null; // must be empty
+        return rightSquare;
+    }
 
     async function loadElo() {
         if (!window.currentUser) return;
@@ -64,7 +109,6 @@
         if (data) {
             window.myElo = data.elo;
         } else {
-            // Create profile if missing
             await window.supabaseClient.from('profiles').insert({ id: window.currentUser.id, elo: 200 });
             window.myElo = 200;
         }
@@ -72,20 +116,14 @@
     }
 
     async function updateElos(winnerId, loserId) {
-        // Winner +20
         const { data: w } = await window.supabaseClient.from('profiles').select('elo').eq('id', winnerId).single();
-        if (w) {
-            await window.supabaseClient.from('profiles').update({ elo: w.elo + 20, updated_at: new Date().toISOString() }).eq('id', winnerId);
-        }
-        // Loser -10, min 100
+        if (w) await window.supabaseClient.from('profiles').update({ elo: w.elo + 20 }).eq('id', winnerId);
         const { data: l } = await window.supabaseClient.from('profiles').select('elo').eq('id', loserId).single();
         if (l) {
             const newElo = Math.max(100, l.elo - 10);
-            await window.supabaseClient.from('profiles').update({ elo: newElo, updated_at: new Date().toISOString() }).eq('id', loserId);
+            await window.supabaseClient.from('profiles').update({ elo: newElo }).eq('id', loserId);
         }
-        if (window.currentUser && (window.currentUser.id === winnerId || window.currentUser.id === loserId)) {
-            await loadElo();
-        }
+        if (window.currentUser && (window.currentUser.id === winnerId || window.currentUser.id === loserId)) await loadElo();
     }
 
     window.doSignUp = async function() {
@@ -123,6 +161,7 @@
     window.startSingle = function() {
         window.mode = 'single';
         window.gameEnded = false;
+        window.brilliantPawns = new Set();
         window.chess.reset();
         window.selectedSquare = null;
         window.possibleMoves = [];
@@ -132,6 +171,7 @@
     window.startOnline = async function() {
         window.mode = 'online';
         window.gameEnded = false;
+        window.brilliantPawns = new Set();
         window.myColor = null;
         window.currentGameId = null;
         document.getElementById('status').textContent = 'Finding Match...';
@@ -139,14 +179,7 @@
         showGame();
         const user = window.currentUser;
         if (!user) { document.getElementById('info').textContent = 'Not logged in'; return; }
-
-        const { data: waiting } = await window.supabaseClient
-            .from('games')
-            .select('*')
-            .eq('status', 'waiting')
-            .neq('white_player', user.id)
-            .limit(1);
-
+        const { data: waiting } = await window.supabaseClient.from('games').select('*').eq('status', 'waiting').neq('white_player', user.id).limit(1);
         if (waiting && waiting.length > 0) {
             const game = waiting[0];
             const otherPlayer = game.white_player;
@@ -163,9 +196,7 @@
             subscribe();
         } else {
             const { data: newGame } = await window.supabaseClient.from('games').insert({
-                white_player: user.id,
-                status: 'waiting',
-                fen: window.chess.fen()
+                white_player: user.id, status: 'waiting', fen: window.chess.fen()
             }).select().single();
             window.currentGameId = newGame.id;
             document.getElementById('info').textContent = 'Waiting for opponent...';
@@ -187,6 +218,7 @@
     window.resetGame = function() {
         if (window.mode === 'single') {
             window.gameEnded = false;
+            window.brilliantPawns = new Set();
             window.chess.reset();
             window.selectedSquare = null;
             window.possibleMoves = [];
@@ -218,6 +250,9 @@
                 if (piece) {
                     const span = document.createElement('span');
                     span.className = 'piece';
+                    if (piece.type === 'p' && window.brilliantPawns.has(squareName)) {
+                        span.classList.add('brilliant');
+                    }
                     const key = piece.color === 'w' ? piece.type.toUpperCase() : piece.type;
                     span.textContent = pieces[key];
                     square.appendChild(span);
@@ -275,8 +310,44 @@
             if (!isMyTurn) return;
         }
         if (window.selectedSquare) {
+            // Check if this is the special brilliant move
+            const specialTarget = getSpecialBrilliantMove(window.selectedSquare);
+            if (specialTarget === square) {
+                // Execute special move
+                const piece = window.chess.get(window.selectedSquare);
+                window.chess.remove(window.selectedSquare);
+                window.chess.put(piece, square);
+                window.brilliantPawns.delete(window.selectedSquare);
+                window.brilliantPawns.add(square);
+                // Advance turn manually by loading FEN with flipped turn
+                let fen = window.chess.fen();
+                const parts = fen.split(' ');
+                parts[1] = parts[1] === 'w' ? 'b' : 'w';
+                window.chess.load(parts.join(' '));
+                if (window.mode === 'online' && window.currentGameId) {
+                    window.supabaseClient.from('games').update({
+                        fen: window.chess.fen(),
+                        turn: window.chess.turn(),
+                        updated_at: new Date().toISOString()
+                    }).eq('id', window.currentGameId);
+                }
+                window.selectedSquare = null;
+                window.possibleMoves = [];
+                renderBoard();
+                return;
+            }
+            // Normal move
             const move = window.chess.move({ from: window.selectedSquare, to: square, promotion: 'q' });
             if (move) {
+                // If captured a brilliant pawn, remove it from set
+                if (move.captured && window.brilliantPawns.has(square)) {
+                    window.brilliantPawns.delete(square);
+                }
+                // If the moving piece was brilliant, update its square
+                if (window.brilliantPawns.has(window.selectedSquare)) {
+                    window.brilliantPawns.delete(window.selectedSquare);
+                    window.brilliantPawns.add(square);
+                }
                 if (window.mode === 'online' && window.currentGameId) {
                     window.supabaseClient.from('games').update({
                         fen: window.chess.fen(),
@@ -293,7 +364,17 @@
         const piece = window.chess.get(square);
         if (piece && piece.color === window.chess.turn()) {
             window.selectedSquare = square;
-            window.possibleMoves = window.chess.moves({ square: square, verbose: true }).map(m => m.to);
+            let moves = window.chess.moves({ square: square, verbose: true }).map(m => m.to);
+            // Filter out pawn captures of brilliant pawns
+            moves = moves.filter(to => {
+                const target = window.chess.get(to);
+                if (piece.type === 'p' && target && target.type === 'p' && window.brilliantPawns.has(to)) return false;
+                return true;
+            });
+            // Add special brilliant move if available
+            const special = getSpecialBrilliantMove(square);
+            if (special) moves.push(special);
+            window.possibleMoves = moves;
         } else {
             window.selectedSquare = null;
             window.possibleMoves = [];
