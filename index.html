@@ -8,12 +8,27 @@
 </head>
 <body>
     <div class="container">
-        <div id="menu">
+        <!-- Auth Screen -->
+        <div id="auth">
             <h1>Shakk Chess</h1>
-            <p>Choose how you want to play</p>
+            <p>Sign in or create an account to play</p>
+            <input type="email" id="email" placeholder="Email" required><br><br>
+            <input type="password" id="password" placeholder="Password" required><br><br>
+            <button id="signInBtn">Sign In</button>
+            <button id="signUpBtn">Sign Up</button>
+            <p id="authMessage"></p>
+        </div>
+
+        <!-- Main Menu (hidden until logged in) -->
+        <div id="menu" style="display:none;">
+            <h1>Shakk Chess</h1>
+            <p id="welcome">Welcome!</p>
             <button id="singleBtn">Single Player</button>
             <button id="onlineBtn">Find Online Match</button>
+            <button id="signOutBtn">Sign Out</button>
         </div>
+
+        <!-- Game Area -->
         <div id="game" style="display:none;">
             <h1>Shakk Chess</h1>
             <div id="status">White to move</div>
@@ -25,29 +40,97 @@
             <p id="info"></p>
         </div>
     </div>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script>
-    // Minimal working version - attach listeners after load
-    window.addEventListener('DOMContentLoaded', function() {
-        document.getElementById('singleBtn').onclick = function() {
-            document.getElementById('menu').style.display = 'none';
-            document.getElementById('game').style.display = 'block';
-            document.getElementById('status').textContent = 'Single Player - White to move';
-            document.getElementById('info').textContent = 'Local game started';
-        };
-        document.getElementById('onlineBtn').onclick = function() {
-            document.getElementById('menu').style.display = 'none';
-            document.getElementById('game').style.display = 'block';
-            document.getElementById('status').textContent = 'Finding Match...';
-            document.getElementById('info').textContent = 'Connecting to Supabase...';
-            // Real matchmaking code can go here later
-        };
-        document.getElementById('backBtn').onclick = function() {
-            document.getElementById('menu').style.display = 'block';
-            document.getElementById('game').style.display = 'none';
-        };
-    });
+    const SUPABASE_URL = 'https://devxzklnldwhyxrlorck.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const authEl = document.getElementById('auth');
+    const menuEl = document.getElementById('menu');
+    const gameEl = document.getElementById('game');
+    const authMessage = document.getElementById('authMessage');
+    const welcomeEl = document.getElementById('welcome');
+
+    function showAuth() {
+        authEl.style.display = 'block';
+        menuEl.style.display = 'none';
+        gameEl.style.display = 'none';
+    }
+
+    function showMenu() {
+        authEl.style.display = 'none';
+        menuEl.style.display = 'block';
+        gameEl.style.display = 'none';
+    }
+
+    function showGame() {
+        authEl.style.display = 'none';
+        menuEl.style.display = 'none';
+        gameEl.style.display = 'block';
+    }
+
+    async function checkSession() {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            welcomeEl.textContent = 'Welcome, ' + (session.user.email || 'Player') + '!';
+            showMenu();
+        } else {
+            showAuth();
+        }
+    }
+
+    document.getElementById('signInBtn').onclick = async function() {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        authMessage.textContent = 'Signing in...';
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+            authMessage.textContent = 'Error: ' + error.message;
+        } else {
+            authMessage.textContent = '';
+            welcomeEl.textContent = 'Welcome, ' + email + '!';
+            showMenu();
+        }
+    };
+
+    document.getElementById('signUpBtn').onclick = async function() {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        authMessage.textContent = 'Creating account...';
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) {
+            authMessage.textContent = 'Error: ' + error.message;
+        } else {
+            authMessage.textContent = 'Account created! Check your email to confirm, then sign in.';
+        }
+    };
+
+    document.getElementById('signOutBtn').onclick = async function() {
+        await supabase.auth.signOut();
+        showAuth();
+    };
+
+    document.getElementById('singleBtn').onclick = function() {
+        showGame();
+        document.getElementById('status').textContent = 'Single Player - White to move';
+        document.getElementById('info').textContent = 'Local game (full board coming next)';
+    };
+
+    document.getElementById('onlineBtn').onclick = function() {
+        showGame();
+        document.getElementById('status').textContent = 'Finding Match...';
+        document.getElementById('info').textContent = 'Online matchmaking (coming next)';
+    };
+
+    document.getElementById('backBtn').onclick = function() {
+        showMenu();
+    };
+
+    // Start by checking if already logged in
+    checkSession();
     </script>
 </body>
 </html>

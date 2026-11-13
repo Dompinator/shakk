@@ -79,3 +79,27 @@ h1 {
         font-size: 28px;
     }
 }
+
+input {
+    padding: 10px;
+    margin: 5px;
+    font-size: 1em;
+    width: 250px;
+}
+#auth button, #menu button, .controls button {
+    margin: 10px;
+    padding: 10px 20px;
+    font-size: 1em;
+}
+
+input {
+    padding: 10px;
+    margin: 5px;
+    font-size: 1em;
+    width: 250px;
+}
+#auth button, #menu button, .controls button {
+    margin: 10px;
+    padding: 10px 20px;
+    font-size: 1em;
+}
