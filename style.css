@@ -1,3 +1,12 @@
+:root {
+    --page-bg: #202a24;
+    --board-frame: #303c33;
+    --board-light: #eeeed2;
+    --board-dark: #769656;
+    --board-highlight: #f6f669;
+    --board-move: #baca44;
+}
+
 body {
     font-family: Arial, sans-serif;
     background: #f0f0f0;
@@ -7,99 +16,96 @@ body {
     min-height: 100vh;
     margin: 0;
 }
-.container {
-    text-align: center;
-}
-h1 {
-    color: #333;
-}
-#menu {
-    padding: 40px;
-}
+.container { text-align: center; }
+h1 { color: #333; }
+#menu { padding: 40px; }
 #menu button, .controls button {
-    display: block;
-    margin: 15px auto;
-    padding: 12px 30px;
-    font-size: 1.2em;
-    cursor: pointer;
-    background: #4CAF50;
-    color: white;
-    border: none;
-    border-radius: 5px;
+    display: block; margin: 15px auto; padding: 12px 30px;
+    font-size: 1.2em; cursor: pointer; background: #4CAF50;
+    color: white; border: none; border-radius: 5px;
 }
-#menu button:hover, .controls button:hover {
-    background: #45a049;
-}
+#menu button:hover, .controls button:hover { background: #45a049; }
+#status { font-size: 1.2em; margin: 10px 0; font-weight: bold; }
+
+/* Chess.com-inspired in-game board presentation */
+#game { width: min(94vw, 760px); margin: 0 auto; }
+#game h1 { margin: 10px 0 8px; }
 #status {
-    font-size: 1.2em;
-    margin: 10px 0;
-    font-weight: bold;
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 38px; padding: 0 18px; border-radius: 9px;
+    background: #fff; color: #3d4b40; box-shadow: 0 2px 8px #00000012;
+    font-size: 15px; font-weight: 700;
 }
 #board {
-    display: grid;
-    grid-template-columns: repeat(8, 60px);
-    grid-template-rows: repeat(8, 60px);
-    border: 4px solid #333;
-    margin: 20px auto;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    --board-size: min(78vw,  min(68vh, 620px));
+    width: var(--board-size); height: var(--board-size);
+    display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    border: clamp(5px, 1vw, 9px) solid var(--board-frame);
+    border-radius: 4px; overflow: hidden; margin: 16px auto 18px;
+    box-shadow: 0 12px 30px #00000035, 0 2px 5px #00000022;
+    background: var(--board-frame); touch-action: manipulation;
 }
 .square {
-    width: 60px;
-    height: 60px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 40px;
-    cursor: pointer;
-    user-select: none;
+    position: relative; min-width: 0; min-height: 0;
+    display: flex; justify-content: center; align-items: center;
+    cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+    transition: background-color 100ms ease;
 }
-.light {
-    background: #f0d9b5;
+.light { background: var(--board-light); }
+.dark { background: var(--board-dark); }
+.square.last-move.light { background: #f6f669; }
+.square.last-move.dark { background: #baca44; }
+.square.selected.light, .square.selected.dark { background: #f6f669; }
+.square.possible::after {
+    content: ""; position: absolute; width: 27%; height: 27%;
+    border-radius: 50%; background: #243b1f; opacity: .28; pointer-events: none;
 }
-.dark {
-    background: #b58863;
-}
-.selected {
-    background: #7fc97f !important;
-}
-.possible {
-    background: #c8e6c9 !important;
+.square.possible.capture-target::after {
+    width: 86%; height: 86%; background: transparent;
+    border: clamp(4px, .7vw, 7px) solid #243b1f; opacity: .28;
 }
 .piece {
-    pointer-events: none;
+    position: relative; z-index: 1; pointer-events: none;
+    display: block; font-family: "Segoe UI Symbol", "DejaVu Sans", "Arial Unicode MS", serif;
+    font-size: clamp(32px, 7.5vw, 70px); line-height: 1;
+    transform: translateY(-2%); transition: transform 100ms ease, filter 100ms ease;
 }
+.white-piece {
+    color: #fff; -webkit-text-stroke: 1px #555;
+    text-shadow: 0 2px 1px #222, 0 3px 3px #0008;
+}
+.square.last-move .piece { animation: pieceDrop 125ms ease-out; }
+.black-piece {
+    color: #252525; -webkit-text-stroke: .7px #090909;
+    text-shadow: 0 1px 1px #fff8, 0 3px 3px #0006;
+}
+.coordinate {
+    position: absolute; z-index: 2; pointer-events: none;
+    font: 700 clamp(8px, 1.2vw, 11px)/1 Arial, sans-serif;
+    opacity: .8;
+}
+.rank-coordinate { top: 3px; left: 4px; }
+.file-coordinate { right: 4px; bottom: 3px; }
+.light .coordinate { color: #769656; }
+.dark .coordinate { color: #eeeed2; }
+.controls {
+    display: flex; justify-content: center; flex-wrap: wrap; gap: 8px;
+}
+.controls button {
+    display: inline-block; margin: 4px; padding: 10px 16px;
+    border-radius: 8px; font-size: 14px; font-weight: 700;
+}
+#info { color: #66736a; font-size: 13px; }
+@keyframes pieceDrop {
+    from { opacity: .55; transform: translateY(-7%) scale(.94); }
+    to { opacity: 1; transform: translateY(-2%) scale(1); }
+}
+
+input { padding: 10px; margin: 5px; font-size: 1em; width: 250px; }
+#auth button, #menu button, .controls button { margin: 10px; padding: 10px 20px; font-size: 1em; }
 @media (max-width: 500px) {
-    #board {
-        grid-template-columns: repeat(8, 40px);
-        grid-template-rows: repeat(8, 40px);
-    }
-    .square {
-        width: 40px;
-        height: 40px;
-        font-size: 28px;
-    }
-}
-
-input {
-    padding: 10px;
-    margin: 5px;
-    font-size: 1em;
-    width: 250px;
-}
-#auth button, #menu button, .controls button {
-    margin: 10px;
-    padding: 10px 20px;
-    font-size: 1em;
-}
-
-input {
-    padding: 10px;
-    margin: 5px;
-    font-size: 1em;
-    width: 250px;
-}
-#auth button, #menu button, .controls button {
-    margin: 10px;
-    padding: 10px 20px;
-    font-size: 1em;
+    #game { width: 96vw; }
+    #board { --board-size: min(90vw, 62vh); }
+    .piece { font-size: clamp(29px, 10vw, 48px); }
+    .controls button { margin: 3px; padding: 9px 11px; }
 }
