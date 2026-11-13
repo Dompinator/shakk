@@ -26,6 +26,34 @@
         justify-content: center;
         box-shadow: 0 0 4px #22c55e;
     }
+    #ruleBook {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.7);
+        z-index: 1000;
+        justify-content: center;
+        align-items: center;
+    }
+    .book {
+        background: #f5e6c8;
+        width: 600px;
+        height: 400px;
+        border-radius: 8px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        display: flex;
+        overflow: hidden;
+        position: relative;
+    }
+    .page {
+        flex: 1;
+        padding: 30px;
+        box-sizing: border-box;
+        border-right: 1px solid #ddd;
+    }
+    .page h2 { margin-top: 0; color: #5a3e2b; }
+    .page-number { position: absolute; top: 10px; right: 20px; font-weight: bold; color: #8b6914; }
+    #closeBook { position: absolute; top: 10px; right: 10px; background: #c00; color: white; border: none; padding: 5px 10px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -45,6 +73,7 @@
             <p id="eloDisplay">ELO: 200</p>
             <button onclick="startSingle()">Single Player</button>
             <button onclick="startOnline()">Find Online Match</button>
+            <button onclick="openRuleBook()">Rule Book</button>
             <button onclick="doSignOut()">Sign Out</button>
         </div>
         <div id="game" style="display:none;">
@@ -54,10 +83,28 @@
             <div class="controls">
                 <button onclick="backToMenu()">Back to Menu</button>
                 <button onclick="resetGame()">Reset</button>
+                <button onclick="openRuleBook()">Rule Book</button>
             </div>
             <p id="info"></p>
         </div>
     </div>
+
+    <div id="ruleBook">
+        <div class="book">
+            <button id="closeBook" onclick="closeRuleBook()">X</button>
+            <div class="page" id="leftPage">
+                <div class="page-number" id="leftNum"></div>
+                <h2 id="leftTitle"></h2>
+                <p id="leftText"></p>
+            </div>
+            <div class="page" id="rightPage">
+                <div class="page-number" id="rightNum"></div>
+                <h2 id="rightTitle"></h2>
+                <p id="rightText"></p>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script>
@@ -74,7 +121,61 @@
     window.possibleMoves = [];
     window.channel = null;
     window.gameEnded = false;
-    window.brilliantPawns = new Set(); // squares with brilliant pawns
+    window.brilliantPawns = new Set();
+
+    // Rules: numbered by when added. Discovered ones are visible.
+    const ALL_RULES = [
+        {
+            num: 1,
+            title: "Brilliant Pawn",
+            text: "When two pawns stand directly in front of each other, your pawn may move 1 step to the right (same rank) and become a Brilliant Pawn. It gets a green !! icon and cannot be captured by other pawns."
+        }
+        // Future rules go here with higher numbers
+    ];
+
+    function getDiscovered() {
+        return JSON.parse(localStorage.getItem('discoveredRules') || '[]');
+    }
+    function discoverRule(num) {
+        const d = getDiscovered();
+        if (!d.includes(num)) {
+            d.push(num);
+            localStorage.setItem('discoveredRules', JSON.stringify(d));
+        }
+    }
+
+    window.openRuleBook = function() {
+        const discovered = getDiscovered();
+        const visible = ALL_RULES.filter(r => discovered.includes(r.num));
+        document.getElementById('ruleBook').style.display = 'flex';
+        if (visible.length === 0) {
+            document.getElementById('leftTitle').textContent = 'No rules discovered yet';
+            document.getElementById('leftText').textContent = 'Play games to unlock custom rules!';
+            document.getElementById('leftNum').textContent = '';
+            document.getElementById('rightTitle').textContent = '';
+            document.getElementById('rightText').textContent = '';
+            document.getElementById('rightNum').textContent = '';
+        } else {
+            // Show first discovered rule on left, next on right if exists
+            const left = visible[0];
+            document.getElementById('leftTitle').textContent = left.title;
+            document.getElementById('leftText').textContent = left.text;
+            document.getElementById('leftNum').textContent = 'Rule ' + left.num;
+            if (visible[1]) {
+                const right = visible[1];
+                document.getElementById('rightTitle').textContent = right.title;
+                document.getElementById('rightText').textContent = right.text;
+                document.getElementById('rightNum').textContent = 'Rule ' + right.num;
+            } else {
+                document.getElementById('rightTitle').textContent = '';
+                document.getElementById('rightText').textContent = '';
+                document.getElementById('rightNum').textContent = '';
+            }
+        }
+    };
+    window.closeRuleBook = function() {
+        document.getElementById('ruleBook').style.display = 'none';
+    };
 
     const pieces = {
         'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
@@ -95,20 +196,19 @@
         const aheadSquare = file + aheadRank;
         const aheadPiece = window.chess.get(aheadSquare);
         if (!aheadPiece || aheadPiece.type !== 'p' || aheadPiece.color === color) return null;
-        // Can move 1 step to the right (increasing file)
         const rightCol = fileToCol(file) + 1;
         if (rightCol > 7) return null;
         const rightSquare = colToFile(rightCol) + rank;
-        if (window.chess.get(rightSquare)) return null; // must be empty
+        if (window.chess.get(rightSquare)) return null;
+        discoverRule(1); // Discover the rule when the situation appears
         return rightSquare;
     }
 
     async function loadElo() {
         if (!window.currentUser) return;
         const { data } = await window.supabaseClient.from('profiles').select('elo').eq('id', window.currentUser.id).single();
-        if (data) {
-            window.myElo = data.elo;
-        } else {
+        if (data) window.myElo = data.elo;
+        else {
             await window.supabaseClient.from('profiles').insert({ id: window.currentUser.id, elo: 200 });
             window.myElo = 200;
         }
@@ -119,10 +219,7 @@
         const { data: w } = await window.supabaseClient.from('profiles').select('elo').eq('id', winnerId).single();
         if (w) await window.supabaseClient.from('profiles').update({ elo: w.elo + 20 }).eq('id', winnerId);
         const { data: l } = await window.supabaseClient.from('profiles').select('elo').eq('id', loserId).single();
-        if (l) {
-            const newElo = Math.max(100, l.elo - 10);
-            await window.supabaseClient.from('profiles').update({ elo: newElo }).eq('id', loserId);
-        }
+        if (l) await window.supabaseClient.from('profiles').update({ elo: Math.max(100, l.elo - 10) }).eq('id', loserId);
         if (window.currentUser && (window.currentUser.id === winnerId || window.currentUser.id === loserId)) await loadElo();
     }
 
@@ -250,9 +347,7 @@
                 if (piece) {
                     const span = document.createElement('span');
                     span.className = 'piece';
-                    if (piece.type === 'p' && window.brilliantPawns.has(squareName)) {
-                        span.classList.add('brilliant');
-                    }
+                    if (piece.type === 'p' && window.brilliantPawns.has(squareName)) span.classList.add('brilliant');
                     const key = piece.color === 'w' ? piece.type.toUpperCase() : piece.type;
                     span.textContent = pieces[key];
                     square.appendChild(span);
@@ -310,16 +405,13 @@
             if (!isMyTurn) return;
         }
         if (window.selectedSquare) {
-            // Check if this is the special brilliant move
             const specialTarget = getSpecialBrilliantMove(window.selectedSquare);
             if (specialTarget === square) {
-                // Execute special move
                 const piece = window.chess.get(window.selectedSquare);
                 window.chess.remove(window.selectedSquare);
                 window.chess.put(piece, square);
                 window.brilliantPawns.delete(window.selectedSquare);
                 window.brilliantPawns.add(square);
-                // Advance turn manually by loading FEN with flipped turn
                 let fen = window.chess.fen();
                 const parts = fen.split(' ');
                 parts[1] = parts[1] === 'w' ? 'b' : 'w';
@@ -336,14 +428,9 @@
                 renderBoard();
                 return;
             }
-            // Normal move
             const move = window.chess.move({ from: window.selectedSquare, to: square, promotion: 'q' });
             if (move) {
-                // If captured a brilliant pawn, remove it from set
-                if (move.captured && window.brilliantPawns.has(square)) {
-                    window.brilliantPawns.delete(square);
-                }
-                // If the moving piece was brilliant, update its square
+                if (move.captured && window.brilliantPawns.has(square)) window.brilliantPawns.delete(square);
                 if (window.brilliantPawns.has(window.selectedSquare)) {
                     window.brilliantPawns.delete(window.selectedSquare);
                     window.brilliantPawns.add(square);
@@ -365,13 +452,11 @@
         if (piece && piece.color === window.chess.turn()) {
             window.selectedSquare = square;
             let moves = window.chess.moves({ square: square, verbose: true }).map(m => m.to);
-            // Filter out pawn captures of brilliant pawns
             moves = moves.filter(to => {
                 const target = window.chess.get(to);
                 if (piece.type === 'p' && target && target.type === 'p' && window.brilliantPawns.has(to)) return false;
                 return true;
             });
-            // Add special brilliant move if available
             const special = getSpecialBrilliantMove(square);
             if (special) moves.push(special);
             window.possibleMoves = moves;
