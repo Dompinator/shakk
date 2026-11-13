@@ -38,42 +38,246 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script>
-    // Auth functions defined first so buttons always work
+    const SUPABASE_URL = 'https://devxzklnldwhyxrlorck.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1';
+    window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    window.currentUser = null;
+    window.chess = new Chess();
+    window.mode = null;
+    window.currentGameId = null;
+    window.myColor = null;
+    window.selectedSquare = null;
+    window.possibleMoves = [];
+    window.channel = null;
+
+    const pieces = {
+        'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
+        'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
+    };
+
+    // ===== AUTH =====
     window.doSignUp = async function() {
         const msg = document.getElementById("authMessage");
         const email = document.getElementById("email").value;
         const password = document.getElementById("password").value;
         if (!email || !password) { msg.textContent = "Enter email and password"; return; }
         msg.textContent = "Creating account...";
-        try {
-            const sb = window.supabase.createClient("https://devxzklnldwhyxrlorck.supabase.co", "sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1");
-            const { error } = await sb.auth.signUp({ email, password });
-            msg.textContent = error ? "Error: " + error.message : "Account created! You can now sign in.";
-        } catch(e) { msg.textContent = "Error: " + e.message; }
+        const { error } = await window.supabaseClient.auth.signUp({ email, password });
+        msg.textContent = error ? "Error: " + error.message : "Account created! You can now sign in.";
     };
+
     window.doSignIn = async function() {
         const msg = document.getElementById("authMessage");
         const email = document.getElementById("email").value;
         const password = document.getElementById("password").value;
         msg.textContent = "Signing in...";
-        try {
-            const sb = window.supabase.createClient("https://devxzklnldwhyxrlorck.supabase.co", "sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1");
-            const { data, error } = await sb.auth.signInWithPassword({ email, password });
-            if (error) { msg.textContent = "Error: " + error.message; return; }
-            window.currentUser = data.user;
-            document.getElementById("welcome").textContent = "Welcome, " + email + "!";
-            document.getElementById("auth").style.display = "none";
-            document.getElementById("menu").style.display = "block";
-        } catch(e) { msg.textContent = "Error: " + e.message; }
+        const { data, error } = await window.supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) { msg.textContent = "Error: " + error.message; return; }
+        window.currentUser = data.user;
+        document.getElementById("welcome").textContent = "Welcome, " + email + "!";
+        document.getElementById("auth").style.display = "none";
+        document.getElementById("menu").style.display = "block";
     };
+
     window.doSignOut = async function() {
-        const sb = window.supabase.createClient("https://devxzklnldwhyxrlorck.supabase.co", "sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1");
-        await sb.auth.signOut();
+        await window.supabaseClient.auth.signOut();
+        window.currentUser = null;
         document.getElementById("auth").style.display = "block";
         document.getElementById("menu").style.display = "none";
         document.getElementById("game").style.display = "none";
     };
+
+    // ===== MENU BUTTONS =====
+    window.startSingle = function() {
+        window.mode = 'single';
+        window.chess.reset();
+        window.selectedSquare = null;
+        window.possibleMoves = [];
+        showGame();
+    };
+
+    window.startOnline = async function() {
+        window.mode = 'online';
+        window.myColor = null;
+        window.currentGameId = null;
+        document.getElementById('status').textContent = 'Finding Match...';
+        document.getElementById('info').textContent = 'Looking for opponent...';
+        showGame();
+        const user = window.currentUser;
+        if (!user) { document.getElementById('info').textContent = 'Not logged in'; return; }
+
+        const { data: waiting } = await window.supabaseClient
+            .from('games')
+            .select('*')
+            .eq('status', 'waiting')
+            .neq('white_player', user.id)
+            .limit(1);
+
+        if (waiting && waiting.length > 0) {
+            const game = waiting[0];
+            const otherPlayer = game.white_player;
+            const iAmWhite = Math.random() < 0.5;
+            await window.supabaseClient.from('games').update({
+                black_player: iAmWhite ? otherPlayer : user.id,
+                white_player: iAmWhite ? user.id : otherPlayer,
+                status: 'active'
+            }).eq('id', game.id);
+            window.currentGameId = game.id;
+            window.myColor = iAmWhite ? 'white' : 'black';
+            window.chess.load(game.fen || window.chess.fen());
+            document.getElementById('info').textContent = 'Matched! You are ' + (window.myColor === 'white' ? 'White' : 'Black');
+            subscribe();
+        } else {
+            const { data: newGame } = await window.supabaseClient.from('games').insert({
+                white_player: user.id,
+                status: 'waiting',
+                fen: window.chess.fen()
+            }).select().single();
+            window.currentGameId = newGame.id;
+            document.getElementById('info').textContent = 'Waiting for opponent...';
+            subscribe();
+        }
+        renderBoard();
+    };
+
+    window.backToMenu = function() {
+        if (window.channel) window.supabaseClient.removeChannel(window.channel);
+        window.mode = null;
+        window.currentGameId = null;
+        window.myColor = null;
+        document.getElementById('game').style.display = 'none';
+        document.getElementById('menu').style.display = 'block';
+    };
+
+    window.resetGame = function() {
+        if (window.mode === 'single') {
+            window.chess.reset();
+            window.selectedSquare = null;
+            window.possibleMoves = [];
+            renderBoard();
+        }
+    };
+
+    function showGame() {
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('game').style.display = 'block';
+        renderBoard();
+    }
+
+    function renderBoard() {
+        const boardEl = document.getElementById('board');
+        if (!boardEl) return;
+        boardEl.innerHTML = '';
+        const board = window.chess.board();
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const square = document.createElement('div');
+                const isLight = (row + col) % 2 === 0;
+                square.className = 'square ' + (isLight ? 'light' : 'dark');
+                const file = String.fromCharCode(97 + col);
+                const rank = 8 - row;
+                const squareName = file + rank;
+                const piece = board[row][col];
+                if (piece) {
+                    const span = document.createElement('span');
+                    span.className = 'piece';
+                    const key = piece.color === 'w' ? piece.type.toUpperCase() : piece.type;
+                    span.textContent = pieces[key];
+                    square.appendChild(span);
+                }
+                if (window.selectedSquare === squareName) square.classList.add('selected');
+                if (window.possibleMoves.includes(squareName)) square.classList.add('possible');
+                square.onclick = () => onSquareClick(squareName);
+                boardEl.appendChild(square);
+            }
+        }
+        updateStatus();
+    }
+
+    function updateStatus() {
+        const statusEl = document.getElementById('status');
+        const infoEl = document.getElementById('info');
+        if (!statusEl) return;
+        if (window.mode === 'single') {
+            const turn = window.chess.turn() === 'w' ? 'White' : 'Black';
+            statusEl.textContent = window.chess.in_checkmate() ? 'Checkmate!' : (window.chess.in_check() ? turn + ' in check' : turn + ' to move');
+            if (infoEl) infoEl.textContent = 'Local game';
+            return;
+        }
+        if (!window.currentGameId || !window.myColor) {
+            statusEl.textContent = 'Finding Match...';
+            return;
+        }
+        const turn = window.chess.turn() === 'w' ? 'White' : 'Black';
+        const myTurn = (window.chess.turn() === 'w' && window.myColor === 'white') || (window.chess.turn() === 'b' && window.myColor === 'black');
+        statusEl.textContent = window.chess.in_checkmate() ? 'Checkmate!' : (turn + ' to move ' + (myTurn ? '(You)' : '(Opponent)'));
+    }
+
+    function onSquareClick(square) {
+        if (window.mode === 'online' && window.currentGameId && window.myColor) {
+            const isMyTurn = (window.chess.turn() === 'w' && window.myColor === 'white') || (window.chess.turn() === 'b' && window.myColor === 'black');
+            if (!isMyTurn) return;
+        }
+        if (window.selectedSquare) {
+            const move = window.chess.move({ from: window.selectedSquare, to: square, promotion: 'q' });
+            if (move) {
+                if (window.mode === 'online' && window.currentGameId) {
+                    window.supabaseClient.from('games').update({
+                        fen: window.chess.fen(),
+                        turn: window.chess.turn(),
+                        updated_at: new Date().toISOString()
+                    }).eq('id', window.currentGameId);
+                }
+                window.selectedSquare = null;
+                window.possibleMoves = [];
+                renderBoard();
+                return;
+            }
+        }
+        const piece = window.chess.get(square);
+        if (piece && piece.color === window.chess.turn()) {
+            window.selectedSquare = square;
+            window.possibleMoves = window.chess.moves({ square: square, verbose: true }).map(m => m.to);
+        } else {
+            window.selectedSquare = null;
+            window.possibleMoves = [];
+        }
+        renderBoard();
+    }
+
+    function subscribe() {
+        if (window.channel) window.supabaseClient.removeChannel(window.channel);
+        window.channel = window.supabaseClient.channel('game-' + window.currentGameId)
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: 'id=eq.' + window.currentGameId }, (payload) => {
+                const game = payload.new;
+                const user = window.currentUser;
+                if (game.status === 'active' && game.white_player && game.black_player && user) {
+                    if (game.white_player === user.id) window.myColor = 'white';
+                    else if (game.black_player === user.id) window.myColor = 'black';
+                    document.getElementById('info').textContent = 'Matched! You are ' + (window.myColor === 'white' ? 'White' : 'Black');
+                    if (game.fen) window.chess.load(game.fen);
+                    window.selectedSquare = null;
+                    window.possibleMoves = [];
+                    renderBoard();
+                } else if (game.fen && game.fen !== window.chess.fen()) {
+                    window.chess.load(game.fen);
+                    window.selectedSquare = null;
+                    window.possibleMoves = [];
+                    renderBoard();
+                }
+            }).subscribe();
+    }
+
+    // Restore session
+    window.supabaseClient.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+            window.currentUser = session.user;
+            document.getElementById("welcome").textContent = "Welcome back!";
+            document.getElementById("auth").style.display = "none";
+            document.getElementById("menu").style.display = "block";
+        }
+    });
     </script>
-    <script src="script.js?v=5"></script>
 </body>
 </html>
