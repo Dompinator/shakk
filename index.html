@@ -20,6 +20,7 @@
         <div id="menu" style="display:none;">
             <h1>Shakk Chess</h1>
             <p id="welcome">Welcome!</p>
+            <p id="eloDisplay">ELO: 200</p>
             <button onclick="startSingle()">Single Player</button>
             <button onclick="startOnline()">Find Online Match</button>
             <button onclick="doSignOut()">Sign Out</button>
@@ -42,6 +43,7 @@
     const SUPABASE_KEY = 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1';
     window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     window.currentUser = null;
+    window.myElo = 200;
     window.chess = new Chess();
     window.mode = null;
     window.currentGameId = null;
@@ -49,13 +51,43 @@
     window.selectedSquare = null;
     window.possibleMoves = [];
     window.channel = null;
+    window.gameEnded = false;
 
     const pieces = {
         'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
         'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
     };
 
-    // ===== AUTH =====
+    async function loadElo() {
+        if (!window.currentUser) return;
+        const { data } = await window.supabaseClient.from('profiles').select('elo').eq('id', window.currentUser.id).single();
+        if (data) {
+            window.myElo = data.elo;
+        } else {
+            // Create profile if missing
+            await window.supabaseClient.from('profiles').insert({ id: window.currentUser.id, elo: 200 });
+            window.myElo = 200;
+        }
+        document.getElementById('eloDisplay').textContent = 'ELO: ' + window.myElo;
+    }
+
+    async function updateElos(winnerId, loserId) {
+        // Winner +20
+        const { data: w } = await window.supabaseClient.from('profiles').select('elo').eq('id', winnerId).single();
+        if (w) {
+            await window.supabaseClient.from('profiles').update({ elo: w.elo + 20, updated_at: new Date().toISOString() }).eq('id', winnerId);
+        }
+        // Loser -10, min 100
+        const { data: l } = await window.supabaseClient.from('profiles').select('elo').eq('id', loserId).single();
+        if (l) {
+            const newElo = Math.max(100, l.elo - 10);
+            await window.supabaseClient.from('profiles').update({ elo: newElo, updated_at: new Date().toISOString() }).eq('id', loserId);
+        }
+        if (window.currentUser && (window.currentUser.id === winnerId || window.currentUser.id === loserId)) {
+            await loadElo();
+        }
+    }
+
     window.doSignUp = async function() {
         const msg = document.getElementById("authMessage");
         const email = document.getElementById("email").value;
@@ -77,6 +109,7 @@
         document.getElementById("welcome").textContent = "Welcome, " + email + "!";
         document.getElementById("auth").style.display = "none";
         document.getElementById("menu").style.display = "block";
+        await loadElo();
     };
 
     window.doSignOut = async function() {
@@ -87,9 +120,9 @@
         document.getElementById("game").style.display = "none";
     };
 
-    // ===== MENU BUTTONS =====
     window.startSingle = function() {
         window.mode = 'single';
+        window.gameEnded = false;
         window.chess.reset();
         window.selectedSquare = null;
         window.possibleMoves = [];
@@ -98,6 +131,7 @@
 
     window.startOnline = async function() {
         window.mode = 'online';
+        window.gameEnded = false;
         window.myColor = null;
         window.currentGameId = null;
         document.getElementById('status').textContent = 'Finding Match...';
@@ -147,10 +181,12 @@
         window.myColor = null;
         document.getElementById('game').style.display = 'none';
         document.getElementById('menu').style.display = 'block';
+        loadElo();
     };
 
     window.resetGame = function() {
         if (window.mode === 'single') {
+            window.gameEnded = false;
             window.chess.reset();
             window.selectedSquare = null;
             window.possibleMoves = [];
@@ -211,10 +247,29 @@
         }
         const turn = window.chess.turn() === 'w' ? 'White' : 'Black';
         const myTurn = (window.chess.turn() === 'w' && window.myColor === 'white') || (window.chess.turn() === 'b' && window.myColor === 'black');
-        statusEl.textContent = window.chess.in_checkmate() ? 'Checkmate!' : (turn + ' to move ' + (myTurn ? '(You)' : '(Opponent)'));
+        if (window.chess.in_checkmate() && !window.gameEnded) {
+            window.gameEnded = true;
+            statusEl.textContent = 'Checkmate!';
+            const winnerColor = window.chess.turn() === 'w' ? 'black' : 'white';
+            handleGameEnd(winnerColor);
+        } else {
+            statusEl.textContent = window.chess.in_checkmate() ? 'Checkmate!' : (turn + ' to move ' + (myTurn ? '(You)' : '(Opponent)'));
+        }
+    }
+
+    async function handleGameEnd(winnerColor) {
+        if (window.mode !== 'online' || !window.currentGameId) return;
+        const { data: game } = await window.supabaseClient.from('games').select('white_player, black_player').eq('id', window.currentGameId).single();
+        if (!game) return;
+        const winnerId = winnerColor === 'white' ? game.white_player : game.black_player;
+        const loserId = winnerColor === 'white' ? game.black_player : game.white_player;
+        await window.supabaseClient.from('games').update({ status: 'finished', winner: winnerId }).eq('id', window.currentGameId);
+        await updateElos(winnerId, loserId);
+        document.getElementById('info').textContent = 'Game over! ELO updated.';
     }
 
     function onSquareClick(square) {
+        if (window.gameEnded) return;
         if (window.mode === 'online' && window.currentGameId && window.myColor) {
             const isMyTurn = (window.chess.turn() === 'w' && window.myColor === 'white') || (window.chess.turn() === 'b' && window.myColor === 'black');
             if (!isMyTurn) return;
@@ -269,13 +324,13 @@
             }).subscribe();
     }
 
-    // Restore session
-    window.supabaseClient.auth.getSession().then(({ data: { session } }) => {
+    window.supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
         if (session) {
             window.currentUser = session.user;
             document.getElementById("welcome").textContent = "Welcome back!";
             document.getElementById("auth").style.display = "none";
             document.getElementById("menu").style.display = "block";
+            await loadElo();
         }
     });
     </script>
