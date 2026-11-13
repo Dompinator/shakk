@@ -8,34 +8,30 @@
 </head>
 <body>
     <div class="container">
-        <!-- Auth Screen -->
         <div id="auth">
             <h1>Shakk Chess</h1>
             <p>Sign in or create an account to play</p>
-            <input type="email" id="email" placeholder="Email" required><br><br>
-            <input type="password" id="password" placeholder="Password" required><br><br>
-            <button id="signInBtn">Sign In</button>
-            <button id="signUpBtn">Sign Up</button>
+            <input type="email" id="email" placeholder="Email"><br><br>
+            <input type="password" id="password" placeholder="Password"><br><br>
+            <button onclick="doSignIn()">Sign In</button>
+            <button onclick="doSignUp()">Sign Up</button>
             <p id="authMessage"></p>
         </div>
 
-        <!-- Main Menu (hidden until logged in) -->
         <div id="menu" style="display:none;">
             <h1>Shakk Chess</h1>
             <p id="welcome">Welcome!</p>
-            <button id="singleBtn">Single Player</button>
-            <button id="onlineBtn">Find Online Match</button>
-            <button id="signOutBtn">Sign Out</button>
+            <button onclick="startSingle()">Single Player</button>
+            <button onclick="startOnline()">Find Online Match</button>
+            <button onclick="doSignOut()">Sign Out</button>
         </div>
 
-        <!-- Game Area -->
         <div id="game" style="display:none;">
             <h1>Shakk Chess</h1>
             <div id="status">White to move</div>
             <div id="board"></div>
             <div class="controls">
-                <button id="backBtn">Back to Menu</button>
-                <button id="resetBtn">Reset Game</button>
+                <button onclick="backToMenu()">Back to Menu</button>
             </div>
             <p id="info"></p>
         </div>
@@ -44,93 +40,76 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script>
-    const SUPABASE_URL = 'https://devxzklnldwhyxrlorck.supabase.co';
-    const SUPABASE_KEY = 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    const authEl = document.getElementById('auth');
-    const menuEl = document.getElementById('menu');
-    const gameEl = document.getElementById('game');
-    const authMessage = document.getElementById('authMessage');
-    const welcomeEl = document.getElementById('welcome');
-
-    function showAuth() {
-        authEl.style.display = 'block';
-        menuEl.style.display = 'none';
-        gameEl.style.display = 'none';
-    }
-
-    function showMenu() {
-        authEl.style.display = 'none';
-        menuEl.style.display = 'block';
-        gameEl.style.display = 'none';
-    }
-
-    function showGame() {
-        authEl.style.display = 'none';
-        menuEl.style.display = 'none';
-        gameEl.style.display = 'block';
-    }
-
-    async function checkSession() {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-            welcomeEl.textContent = 'Welcome, ' + (session.user.email || 'Player') + '!';
-            showMenu();
-        } else {
-            showAuth();
-        }
-    }
-
-    document.getElementById('signInBtn').onclick = async function() {
+    window.doSignUp = async function() {
+        const msg = document.getElementById('authMessage');
+        msg.textContent = 'Sign Up clicked!';
         const email = document.getElementById('email').value;
         const password = document.getElementById('password').value;
-        authMessage.textContent = 'Signing in...';
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) {
-            authMessage.textContent = 'Error: ' + error.message;
-        } else {
-            authMessage.textContent = '';
-            welcomeEl.textContent = 'Welcome, ' + email + '!';
-            showMenu();
+        if (!email || !password) {
+            msg.textContent = 'Please enter email and password';
+            return;
+        }
+        msg.textContent = 'Creating account...';
+        try {
+            const supabase = window.supabase.createClient('https://devxzklnldwhyxrlorck.supabase.co', 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1');
+            const { data, error } = await supabase.auth.signUp({ email, password });
+            if (error) {
+                msg.textContent = 'Error: ' + error.message;
+            } else {
+                msg.textContent = 'Account created! You can now sign in.';
+            }
+        } catch (e) {
+            msg.textContent = 'Exception: ' + e.message;
         }
     };
 
-    document.getElementById('signUpBtn').onclick = async function() {
+    window.doSignIn = async function() {
+        const msg = document.getElementById('authMessage');
+        msg.textContent = 'Signing in...';
         const email = document.getElementById('email').value;
         const password = document.getElementById('password').value;
-        authMessage.textContent = 'Creating account...';
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) {
-            authMessage.textContent = 'Error: ' + error.message;
-        } else {
-            authMessage.textContent = 'Account created! Check your email to confirm, then sign in.';
+        try {
+            const supabase = window.supabase.createClient('https://devxzklnldwhyxrlorck.supabase.co', 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1');
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            if (error) {
+                msg.textContent = 'Error: ' + error.message;
+            } else {
+                msg.textContent = '';
+                document.getElementById('auth').style.display = 'none';
+                document.getElementById('menu').style.display = 'block';
+                document.getElementById('welcome').textContent = 'Welcome, ' + email + '!';
+            }
+        } catch (e) {
+            msg.textContent = 'Exception: ' + e.message;
         }
     };
 
-    document.getElementById('signOutBtn').onclick = async function() {
+    window.doSignOut = async function() {
+        const supabase = window.supabase.createClient('https://devxzklnldwhyxrlorck.supabase.co', 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1');
         await supabase.auth.signOut();
-        showAuth();
+        document.getElementById('auth').style.display = 'block';
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('game').style.display = 'none';
     };
 
-    document.getElementById('singleBtn').onclick = function() {
-        showGame();
-        document.getElementById('status').textContent = 'Single Player - White to move';
-        document.getElementById('info').textContent = 'Local game (full board coming next)';
+    window.startSingle = function() {
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('game').style.display = 'block';
+        document.getElementById('status').textContent = 'Single Player';
+        document.getElementById('info').textContent = 'Board will be added next';
     };
 
-    document.getElementById('onlineBtn').onclick = function() {
-        showGame();
+    window.startOnline = function() {
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('game').style.display = 'block';
         document.getElementById('status').textContent = 'Finding Match...';
-        document.getElementById('info').textContent = 'Online matchmaking (coming next)';
+        document.getElementById('info').textContent = 'Matchmaking next';
     };
 
-    document.getElementById('backBtn').onclick = function() {
-        showMenu();
+    window.backToMenu = function() {
+        document.getElementById('game').style.display = 'none';
+        document.getElementById('menu').style.display = 'block';
     };
-
-    // Start by checking if already logged in
-    checkSession();
     </script>
 </body>
 </html>
