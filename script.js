@@ -1,3 +1,4 @@
+window.scriptStarted = true;
 const SUPABASE_URL = 'https://devxzklnldwhyxrlorck.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_X7YnI_XIJUZi1tfklN6-FQ_RpVEDKy1';
 let supabase;
