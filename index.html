@@ -6,47 +6,6 @@
     <title>Shakk - Chess</title>
     <link rel="stylesheet" href="style.css">
     <style>
-    .brilliant { position: relative; }
-    .brilliant::after {
-        content: "!!"; position: absolute; top: -7px; right: -8px;
-        background: #22c55e; color: #fff; font: 800 11px/18px Arial,sans-serif;
-        border-radius: 50%; width: 18px; height: 18px; text-align: center;
-        box-shadow: 0 2px 7px #14532d99;
-    }
-
-    /* Shakk Rule Book — clean, modern in-game reference */
-    #ruleBook {
-        display: none; position: fixed; inset: 0; z-index: 1000;
-        justify-content: center; align-items: center; padding: 20px;
-        background: rgba(12, 18, 14, .78); backdrop-filter: blur(7px);
-    }
-    .book {
-        width: min(760px, 100%); min-height: 360px; max-height: min(620px, 90vh);
-        background: #202a24; color: #f4f7f2; border: 1px solid #45564a;
-        border-radius: 18px; box-shadow: 0 24px 80px #0009;
-        display: grid; grid-template-columns: 230px 1fr; overflow: hidden; position: relative;
-    }
-    .page { box-sizing: border-box; padding: 30px; min-width: 0; }
-    #leftPage { background: #29372e; border-right: 1px solid #435247; }
-    #rightPage { padding: 42px 38px 34px; }
-    .page h2 { margin: 0 0 14px; color: #f4f7f2; font-size: 23px; letter-spacing: -.4px; }
-    .page p { color: #cbd5ce; line-height: 1.7; font-size: 15px; margin: 0; }
-    .page-number { color: #9bb5a0; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
-    #leftTitle { font-size: 18px; }
-    #leftText { color: #aebdb2; font-size: 13px; }
-    #rightTitle { font-size: 27px; }
-    #closeBook {
-        position: absolute; top: 14px; right: 14px; z-index: 2;
-        width: 34px; height: 34px; border: 0; border-radius: 9px;
-        background: #35443a; color: #eaf1eb; font-size: 20px; cursor: pointer;
-    }
-    #closeBook:hover { background: #49614f; }
-    @media (max-width: 560px) {
-        .book { grid-template-columns: 1fr; max-height: 90vh; overflow-y: auto; }
-        #leftPage { padding: 22px 24px; border-right: 0; border-bottom: 1px solid #435247; }
-        #rightPage { padding: 28px 24px; }
-        #leftTitle { margin-bottom: 6px; }
-    }
     </style>
 </head>
 <body>
@@ -72,13 +31,21 @@
         <div id="game" style="display:none;">
             <h1>Shakk Chess</h1>
             <div id="status">White to move</div>
-            <div id="board"></div>
-            <div class="controls">
-                <button onclick="backToMenu()">Back to Menu</button>
-                <button onclick="resetGame()">Reset</button>
-                <button onclick="openRuleBook()">Rule Book</button>
+            <div class="game-layout">
+                <div class="board-column">
+                    <div class="player-strip"><span class="player-avatar">♟</span><span class="player-name">Opponent</span><span class="player-rating">—</span></div>
+                    <div id="board"></div>
+                    <div class="player-strip" style="margin:9px 0 0;"><span class="player-avatar">♙</span><span class="player-name">You</span><span class="player-rating" id="playerElo">ELO 200</span></div>
+                </div>
+                <aside class="side-panel">
+                    <div class="panel-card"><p class="panel-title">Game</p><div id="info">Local game</div></div>
+                    <div class="panel-card"><p class="panel-title">Controls</p><div class="controls">
+                        <button onclick="backToMenu()">Menu</button>
+                        <button onclick="resetGame()">New Game</button>
+                        <button onclick="openRuleBook()">Rule Book</button>
+                    </div></div>
+                </aside>
             </div>
-            <p id="info"></p>
         </div>
     </div>
 
@@ -116,6 +83,7 @@
     window.channel = null;
     window.gameEnded = false;
     window.brilliantPawns = new Set();
+    window.lastMoveSquares = [];
     window.lastMoveSquares = [];
     window.sessionDiscoveredRules = new Set();
     let soundContext = null;
@@ -275,6 +243,8 @@
             window.myElo = 200;
         }
         document.getElementById('eloDisplay').textContent = 'ELO: ' + window.myElo;
+        const playerElo = document.getElementById('playerElo');
+        if (playerElo) playerElo.textContent = 'ELO ' + window.myElo;
     }
 
     async function updateElos(winnerId, loserId) {
@@ -406,6 +376,9 @@
                 const square = document.createElement('div');
                 const isLight = (row + col) % 2 === 0;
                 square.className = 'square ' + (isLight ? 'light' : 'dark');
+                square.dataset.file = file;
+                square.dataset.rank = String(rank);
+                if (window.lastMoveSquares.includes(squareName)) square.classList.add('last-move');
                 square.dataset.square = squareName;
                 if (window.lastMoveSquares.includes(squareName)) square.classList.add('last-move');
                 const file = String.fromCharCode(97 + col);
@@ -471,6 +444,24 @@
         document.getElementById('info').textContent = 'Game over! ELO updated.';
     }
 
+    let shakkAudio = null;
+    function playBoardSound(kind) {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            shakkAudio = shakkAudio || new AudioCtx();
+            if (shakkAudio.state === 'suspended') shakkAudio.resume();
+            const osc = shakkAudio.createOscillator(), gain = shakkAudio.createGain();
+            const now = shakkAudio.currentTime;
+            const tone = ({select:[520,.045],move:[360,.075],capture:[190,.11],special:[680,.13]})[kind] || [360,.075];
+            osc.type = kind === 'capture' ? 'triangle' : 'sine';
+            osc.frequency.setValueAtTime(tone[0],now);
+            if (kind === 'special') osc.frequency.exponentialRampToValueAtTime(920,now+tone[1]);
+            gain.gain.setValueAtTime(.0001,now); gain.gain.exponentialRampToValueAtTime(.11,now+.008); gain.gain.exponentialRampToValueAtTime(.0001,now+tone[1]);
+            osc.connect(gain); gain.connect(shakkAudio.destination); osc.start(now); osc.stop(now+tone[1]+.01);
+        } catch(e) { /* Sound is optional and must never interrupt a move. */ }
+    }
+
     function onSquareClick(square) {
         if (window.gameEnded) return;
         if (window.mode === 'online' && window.currentGameId && window.myColor) {
@@ -517,6 +508,7 @@
             const move = window.chess.move({ from: window.selectedSquare, to: square, promotion: 'q' });
             if (move) {
                 window.lastMoveSquares = [move.from, move.to];
+                playBoardSound(move.captured ? 'capture' : 'move');
                 animatePieceMove(move.from, move.to);
                 playBoardSound(move.captured ? 'capture' : 'move');
                 if (move.captured && window.brilliantPawns.has(square)) window.brilliantPawns.delete(square);
@@ -541,6 +533,7 @@
         if (piece && piece.color === window.chess.turn()) {
             playBoardSound('select');
             window.selectedSquare = square;
+            playBoardSound('select');
             let moves = window.chess.moves({ square: square, verbose: true }).map(m => m.to);
             moves = moves.filter(to => {
                 const target = window.chess.get(to);
