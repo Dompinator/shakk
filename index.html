@@ -9,14 +9,15 @@
 <body>
     <div class="container">
         <h1>Shakk Chess</h1>
-        <div id="status">White to move</div>
+        <div id="status">Click Find Match to play</div>
         <div id="board"></div>
         <div class="controls">
-            <button id="reset">Reset Game</button>
-            <button id="undo">Undo</button>
+            <button id="findMatch">Find Match</button>
+            <button id="reset" style="display:none;">New Game</button>
         </div>
-        <p>Click a piece to select, then click a highlighted square to move.</p>
+        <p id="info">Multiplayer chess with matchmaking</p>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script src="script.js"></script>
 </body>
