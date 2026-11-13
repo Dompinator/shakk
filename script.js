@@ -21,7 +21,7 @@ const pieces = {
 let playerId = localStorage.getItem('playerId') || crypto.randomUUID();
 localStorage.setItem('playerId', playerId);
 
-let mode = null; // 'single' or 'online'
+let mode = null;
 let currentGameId = null;
 let myColor = null;
 let selectedSquare = null;
@@ -98,7 +98,7 @@ function updateStatus() {
     }
 
     if (!currentGameId) {
-        statusEl.textContent = 'Searching...';
+        statusEl.textContent = 'Finding Match...';
         return;
     }
     const turn = chess.turn() === 'w' ? 'White' : 'Black';
@@ -170,43 +170,55 @@ function startSinglePlayer() {
 
 async function findMatch() {
     mode = 'online';
-    statusEl.textContent = 'Searching for opponent...';
-    infoEl.textContent = 'Looking for a match...';
-    startGame();
+    statusEl.textContent = 'Finding Match...';
+    infoEl.textContent = 'Connecting to server...';
+    startGame(); // Show the game area immediately with loading text
 
-    const { data: waiting } = await supabase
-        .from('games')
-        .select('*')
-        .eq('status', 'waiting')
-        .is('black_player', null)
-        .order('created_at', { ascending: true })
-        .limit(1);
+    try {
+        const { data: waiting, error: selectError } = await supabase
+            .from('games')
+            .select('*')
+            .eq('status', 'waiting')
+            .is('black_player', null)
+            .order('created_at', { ascending: true })
+            .limit(1);
 
-    if (waiting && waiting.length > 0) {
-        const game = waiting[0];
-        await supabase.from('games').update({
-            black_player: playerId,
-            status: 'active'
-        }).eq('id', game.id);
+        if (selectError) throw selectError;
 
-        currentGameId = game.id;
-        myColor = 'black';
-        chess.load(game.fen || chess.fen());
-        infoEl.textContent = 'You are Black';
-        subscribeToGame();
-    } else {
-        const { data: newGame } = await supabase.from('games').insert({
-            white_player: playerId,
-            status: 'waiting',
-            fen: chess.fen()
-        }).select().single();
+        if (waiting && waiting.length > 0) {
+            const game = waiting[0];
+            const { error: updateError } = await supabase.from('games').update({
+                black_player: playerId,
+                status: 'active'
+            }).eq('id', game.id);
 
-        currentGameId = newGame.id;
-        myColor = 'white';
-        infoEl.textContent = 'You are White - waiting for opponent...';
-        subscribeToGame();
+            if (updateError) throw updateError;
+
+            currentGameId = game.id;
+            myColor = 'black';
+            chess.load(game.fen || chess.fen());
+            infoEl.textContent = 'You are Black';
+            subscribeToGame();
+        } else {
+            const { data: newGame, error: insertError } = await supabase.from('games').insert({
+                white_player: playerId,
+                status: 'waiting',
+                fen: chess.fen()
+            }).select().single();
+
+            if (insertError) throw insertError;
+
+            currentGameId = newGame.id;
+            myColor = 'white';
+            infoEl.textContent = 'You are White - waiting for opponent...';
+            subscribeToGame();
+        }
+        renderBoard();
+    } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Error connecting';
+        infoEl.textContent = 'Supabase error: ' + (err.message || err.details || JSON.stringify(err)) + '. Check tables and policies.';
     }
-    renderBoard();
 }
 
 function subscribeToGame() {
@@ -246,5 +258,4 @@ resetGameBtn.addEventListener('click', () => {
     }
 });
 
-// Start on menu
 showMenu();
