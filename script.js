@@ -10,6 +10,142 @@ let selectedSquare = null;
 let possibleMoves = [];
 let channel = null;
 
+let botEnabled = false;
+let botTimer = null;
+let botThinking = false;
+
+// Lightweight local chess engine. It searches legal chess.js moves and scores
+// positions by material, piece activity, king safety and checkmate.
+const BOT_VALUES = { p: 100, n: 320, b: 335, r: 500, q: 900, k: 20000 };
+
+function botEvaluate(position) {
+    if (position.in_checkmate()) return position.turn() === 'w' ? -100000 : 100000;
+    if (position.in_draw() || position.in_stalemate()) return 0;
+
+    let score = 0;
+    const board = position.board();
+    for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+            const piece = board[row][col];
+            if (!piece) continue;
+            const sign = piece.color === 'w' ? 1 : -1;
+            const value = BOT_VALUES[piece.type] || 0;
+            const center = 3.5 - (Math.abs(3.5 - col) + Math.abs(3.5 - row)) / 2;
+            let activity = 0;
+            if (piece.type === 'n' || piece.type === 'b') activity = center * 7;
+            if (piece.type === 'p') activity = (piece.color === 'w' ? 6 - row : row - 1) * 5;
+            if (piece.type === 'k' && row >= 2 && row <= 5) activity -= 12;
+            score += sign * (value + activity);
+        }
+    }
+    if (position.in_check()) score += position.turn() === 'w' ? -35 : 35;
+    return score;
+}
+
+function botSearch(position, depth, alpha, beta) {
+    if (depth <= 0 || position.game_over()) return botEvaluate(position);
+
+    const moves = position.moves({ verbose: true });
+    moves.sort((a, b) => {
+        const av = (b.captured ? BOT_VALUES[b.captured] : 0) - (a.captured ? BOT_VALUES[a.captured] : 0);
+        const bv = (a.captured ? BOT_VALUES[a.captured] : 0) - (b.captured ? BOT_VALUES[b.captured] : 0);
+        return av - bv;
+    });
+
+    const maximizing = position.turn() === 'w';
+    let best = maximizing ? -Infinity : Infinity;
+    for (const candidate of moves) {
+        const move = position.move({ from: candidate.from, to: candidate.to, promotion: candidate.promotion || 'q' });
+        if (!move) continue;
+        const score = botSearch(position, depth - 1, alpha, beta);
+        position.undo();
+
+        if (maximizing) {
+            best = Math.max(best, score);
+            alpha = Math.max(alpha, best);
+        } else {
+            best = Math.min(best, score);
+            beta = Math.min(beta, best);
+        }
+        if (beta <= alpha) break;
+    }
+    return best;
+}
+
+function findBestBotMove() {
+    const moves = chess.moves({ verbose: true });
+    if (!moves.length) return null;
+    const maximizing = chess.turn() === 'w';
+    let bestScore = maximizing ? -Infinity : Infinity;
+    let bestMoves = [];
+    for (const candidate of moves) {
+        const move = chess.move({ from: candidate.from, to: candidate.to, promotion: candidate.promotion || 'q' });
+        if (!move) continue;
+        const score = botSearch(chess, 2, -Infinity, Infinity);
+        chess.undo();
+        if ((maximizing && score > bestScore) || (!maximizing && score < bestScore)) {
+            bestScore = score;
+            bestMoves = [candidate];
+        } else if (score === bestScore) {
+            bestMoves.push(candidate);
+        }
+    }
+    return bestMoves[0] || null;
+}
+
+function stopBotTimer() {
+    if (botTimer) clearTimeout(botTimer);
+    botTimer = null;
+    botThinking = false;
+}
+
+function scheduleBotMove() {
+    stopBotTimer();
+    if (!botEnabled || mode !== 'single' || chess.game_over()) return;
+    botThinking = true;
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'SHakk Auto Bot · Moving in 5 seconds…';
+    botTimer = setTimeout(() => {
+        botTimer = null;
+        if (!botEnabled || mode !== 'single' || chess.game_over()) {
+            botThinking = false;
+            return;
+        }
+        const best = findBestBotMove();
+        if (best) {
+            const move = chess.move({
+                from: best.from,
+                to: best.to,
+                promotion: best.promotion || 'q'
+            });
+            if (move) {
+                selectedSquare = null;
+                possibleMoves = [];
+                renderBoard();
+            }
+        }
+        botThinking = false;
+        if (botEnabled && !chess.game_over()) scheduleBotMove();
+        else renderBoard();
+    }, 5000);
+}
+
+function toggleBot() {
+    if (mode !== 'single') {
+        const infoEl = document.getElementById('info');
+        if (infoEl) infoEl.textContent = 'F2 Auto Bot is available in local games only.';
+        return;
+    }
+    botEnabled = !botEnabled;
+    stopBotTimer();
+    const infoEl = document.getElementById('info');
+    if (infoEl) infoEl.textContent = botEnabled
+        ? 'Auto Bot ON · Best-move search · 5-second turns'
+        : 'Auto Bot OFF';
+    if (botEnabled) scheduleBotMove();
+    else renderBoard();
+}
+
 const pieces = {
     'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
     'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
@@ -59,7 +195,7 @@ function updateStatus() {
     if (mode === 'single') {
         const turn = chess.turn() === 'w' ? 'White' : 'Black';
         statusEl.textContent = chess.in_checkmate() ? 'Checkmate!' : (chess.in_check() ? turn + ' in check' : turn + ' to move');
-        if (infoEl) infoEl.textContent = 'Local game';
+        if (infoEl) infoEl.textContent = botEnabled ? 'Auto Bot ON · 5-second turns (F2 to stop)' : 'Local game (F2: Auto Bot)';
         return;
     }
     if (!currentGameId || !myColor) {
@@ -72,6 +208,7 @@ function updateStatus() {
 }
 
 function onSquareClick(square) {
+    if (botEnabled && mode === 'single') return;
     if (mode === 'online' && currentGameId && myColor) {
         const isMyTurn = (chess.turn() === 'w' && myColor === 'white') || (chess.turn() === 'b' && myColor === 'black');
         if (!isMyTurn) return;
@@ -109,9 +246,12 @@ window.startSingle = function() {
     selectedSquare = null;
     possibleMoves = [];
     showGame();
+    if (botEnabled) scheduleBotMove();
 };
 
 window.startOnline = async function() {
+    stopBotTimer();
+    botEnabled = false;
     mode = 'online';
     myColor = null;
     currentGameId = null;
@@ -180,6 +320,8 @@ function subscribe() {
 }
 
 window.backToMenu = function() {
+    stopBotTimer();
+    botEnabled = false;
     if (channel) supabase.removeChannel(channel);
     mode = null;
     currentGameId = null;
@@ -194,5 +336,16 @@ window.resetGame = function() {
         selectedSquare = null;
         possibleMoves = [];
         renderBoard();
+        if (botEnabled) scheduleBotMove();
     }
 };
+
+
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'F2' || event.repeat) return;
+    const target = event.target;
+    if (target && (target.isContentEditable ||
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+    event.preventDefault();
+    toggleBot();
+});
