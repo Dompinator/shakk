@@ -8,7 +8,6 @@
 </head>
 <body>
     <div class="container">
-        <!-- Auth -->
         <div id="auth">
             <h1>Shakk Chess</h1>
             <p>Sign in or create an account to play</p>
@@ -19,7 +18,6 @@
             <p id="authMessage"></p>
         </div>
 
-        <!-- Menu -->
         <div id="menu" style="display:none;">
             <h1>Shakk Chess</h1>
             <p id="welcome">Welcome!</p>
@@ -28,7 +26,6 @@
             <button onclick="doSignOut()">Sign Out</button>
         </div>
 
-        <!-- Game -->
         <div id="game" style="display:none;">
             <h1>Shakk Chess</h1>
             <div id="status">White to move</div>
@@ -80,6 +77,7 @@
 
     function renderBoard() {
         const boardEl = document.getElementById('board');
+        if (!boardEl) return;
         boardEl.innerHTML = '';
         const board = chess.board();
         for (let row = 0; row < 8; row++) {
@@ -110,13 +108,14 @@
     function updateStatus() {
         const statusEl = document.getElementById('status');
         const infoEl = document.getElementById('info');
+        if (!statusEl) return;
         if (mode === 'single') {
             const turn = chess.turn() === 'w' ? 'White' : 'Black';
             statusEl.textContent = chess.in_checkmate() ? 'Checkmate!' : (chess.in_check() ? turn + ' in check' : turn + ' to move');
-            infoEl.textContent = 'Local game';
+            if (infoEl) infoEl.textContent = 'Local game';
             return;
         }
-        if (!currentGameId) {
+        if (!currentGameId || !myColor) {
             statusEl.textContent = 'Finding Match...';
             return;
         }
@@ -126,7 +125,7 @@
     }
 
     function onSquareClick(square) {
-        if (mode === 'online' && currentGameId) {
+        if (mode === 'online' && currentGameId && myColor) {
             const isMyTurn = (chess.turn() === 'w' && myColor === 'white') || (chess.turn() === 'b' && myColor === 'black');
             if (!isMyTurn) return;
         }
@@ -198,29 +197,46 @@
 
     window.startOnline = async function() {
         mode = 'online';
+        myColor = null;
+        currentGameId = null;
         document.getElementById('status').textContent = 'Finding Match...';
         document.getElementById('info').textContent = 'Looking for opponent...';
         showGame();
         if (!currentUser) { document.getElementById('info').textContent = 'Not logged in'; return; }
 
-        const { data: waiting } = await supabase.from('games').select('*').eq('status', 'waiting').is('black_player', null).limit(1);
+        // Look for a waiting game that is not mine
+        const { data: waiting } = await supabase
+            .from('games')
+            .select('*')
+            .eq('status', 'waiting')
+            .neq('white_player', currentUser.id)
+            .limit(1);
+
         if (waiting && waiting.length > 0) {
+            // Join existing game and randomly assign colors
             const game = waiting[0];
-            await supabase.from('games').update({ black_player: currentUser.id, status: 'active' }).eq('id', game.id);
+            const otherPlayer = game.white_player;
+            const iAmWhite = Math.random() < 0.5;
+            const update = {
+                black_player: iAmWhite ? otherPlayer : currentUser.id,
+                white_player: iAmWhite ? currentUser.id : otherPlayer,
+                status: 'active'
+            };
+            await supabase.from('games').update(update).eq('id', game.id);
             currentGameId = game.id;
-            myColor = 'black';
+            myColor = iAmWhite ? 'white' : 'black';
             chess.load(game.fen || chess.fen());
-            document.getElementById('info').textContent = 'You are Black';
+            document.getElementById('info').textContent = 'Matched! You are ' + (myColor === 'white' ? 'White' : 'Black');
             subscribe();
         } else {
+            // Create new waiting game (I am temporarily stored in white_player)
             const { data: newGame } = await supabase.from('games').insert({
                 white_player: currentUser.id,
                 status: 'waiting',
                 fen: chess.fen()
             }).select().single();
             currentGameId = newGame.id;
-            myColor = 'white';
-            document.getElementById('info').textContent = 'You are White - waiting...';
+            document.getElementById('info').textContent = 'Waiting for opponent...';
             subscribe();
         }
         renderBoard();
@@ -230,14 +246,21 @@
         if (channel) supabase.removeChannel(channel);
         channel = supabase.channel('game-' + currentGameId)
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: 'id=eq.' + currentGameId }, (payload) => {
-                if (payload.new.fen && payload.new.fen !== chess.fen()) {
-                    chess.load(payload.new.fen);
+                const game = payload.new;
+                if (game.status === 'active' && game.white_player && game.black_player) {
+                    // Colors have been assigned
+                    if (game.white_player === currentUser.id) myColor = 'white';
+                    else if (game.black_player === currentUser.id) myColor = 'black';
+                    document.getElementById('info').textContent = 'Matched! You are ' + (myColor === 'white' ? 'White' : 'Black');
+                    if (game.fen) chess.load(game.fen);
                     selectedSquare = null;
                     possibleMoves = [];
                     renderBoard();
-                }
-                if (payload.new.status === 'active' && myColor === 'white') {
-                    document.getElementById('info').textContent = 'Opponent joined! You are White';
+                } else if (game.fen && game.fen !== chess.fen()) {
+                    chess.load(game.fen);
+                    selectedSquare = null;
+                    possibleMoves = [];
+                    renderBoard();
                 }
             }).subscribe();
     }
@@ -246,6 +269,7 @@
         if (channel) supabase.removeChannel(channel);
         mode = null;
         currentGameId = null;
+        myColor = null;
         showMenu();
     };
 
@@ -258,7 +282,6 @@
         }
     };
 
-    // Check existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
         if (session) {
             currentUser = session.user;
